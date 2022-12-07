@@ -62,7 +62,7 @@ func (C *Cluster) Connect(peers ...string) error {
 	C.nm.Address = list.LocalNode().Address()
 	var filtered []string
 	for _, p := range peers {
-		if list.LocalNode().Name != p && list.LocalNode().Addr.String() != p {
+		if list.LocalNode().Name != p || list.LocalNode().Addr.String() != p {
 			filtered = append(filtered, p)
 		}
 	}
