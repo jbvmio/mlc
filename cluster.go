@@ -62,9 +62,10 @@ func (C *Cluster) Connect(peers ...string) error {
 	C.Memberlist = list
 	C.nm.Address = list.LocalNode().Address()
 	var filtered []string
-	pp := C.n.Config.AdvertiseAddr + `:` + strconv.Itoa(C.n.Config.AdvertisePort)
+	ap := list.LocalNode().FullAddress()
+	np := ap.Name + `:` + strconv.Itoa(C.n.Config.AdvertisePort)
 	for _, p := range peers {
-		if pp != p {
+		if p != ap.Addr && p != ap.Name && p != np {
 			filtered = append(filtered, p)
 		}
 	}
@@ -81,10 +82,17 @@ func (C *Cluster) Connect(peers ...string) error {
 			}
 		}
 	case mems > 0:
+		var count int
 		list.LocalNode().Meta = C.d.NodeMeta(MetaMaxSize)
 		for C.nm.Leader == "" || C.nm.LeaderAddr == "" {
 			C.n.L.Printf("[INFO] mlc: Waiting for Leader Data")
 			time.Sleep(time.Second * 1)
+			count++
+			if count >= 30 {
+				err := fmt.Errorf("timed out waiting for leader data")
+				C.n.L.Printf("[ERROR] mlc: %v\n", err)
+				return err
+			}
 		}
 		C.runOnJoin()
 	default:
