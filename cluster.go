@@ -3,6 +3,7 @@ package mlc
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -61,8 +62,9 @@ func (C *Cluster) Connect(peers ...string) error {
 	C.Memberlist = list
 	C.nm.Address = list.LocalNode().Address()
 	var filtered []string
+	pp := C.n.Config.AdvertiseAddr + `:` + strconv.Itoa(C.n.Config.AdvertisePort)
 	for _, p := range peers {
-		if list.LocalNode().Name != p || list.LocalNode().Addr.String() != p {
+		if pp != p {
 			filtered = append(filtered, p)
 		}
 	}
