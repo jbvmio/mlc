@@ -77,6 +77,7 @@ func (C *Cluster) electLeader() {
 	C.nm.LeaderAddr = highestAddr
 	C.LocalNode().Meta = C.d.Encode(C.nm)
 	err := C.UpdateNode(time.Second * 5)
+	C.n.L.Printf("[INFO] mlc: %s elected leader: %s at %s\n", C.nm.Name, C.nm.Leader, C.nm.LeaderAddr)
 	if err != nil {
 		C.n.L.Printf("[ERROR] mlc: error updating node: %v\n", err)
 	}

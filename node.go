@@ -27,9 +27,6 @@ func (C *NodeConfig) SetDefaults() {
 	if C.BindPort == 0 {
 		C.BindPort = 7946
 	}
-	if C.AdvertiseAddr == "" {
-		C.AdvertiseAddr = C.BindAddr
-	}
 	if C.AdvertisePort == 0 {
 		C.AdvertisePort = C.BindPort
 	}
