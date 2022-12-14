@@ -54,23 +54,74 @@ func (C *Cluster) runOnJoin() {
 }
 
 func (C *Cluster) electLeader() {
-	var highestVal int
-	var highestNode string
-	var highestAddr string
-	members := C.Members()
-	sort.SliceStable(members, func(i, j int) bool {
-		return members[i].Name < members[j].Name
-	})
-	for _, m := range members {
-		var val int
-		for _, oct := range strings.Split(m.Addr.String(), `.`) {
-			o, _ := strconv.Atoi(oct)
-			val += o
-		}
-		if val > highestVal {
-			highestNode = m.Name
-			highestAddr = m.Address()
-			highestVal = val
+	oldLeader := C.nm.Leader
+	oldLeaderAddr := C.nm.LeaderAddr
+	C.n.L.Printf("[INFO] mlc: leader %s with address %s has left, performing election\n", oldLeader, oldLeaderAddr)
+	highestNode, highestAddr := C.quickElect()
+
+	if C.n.DirLockPath != "" {
+		switch highestNode {
+		case C.LocalNode().Name:
+			var tries int
+			var dirLockErr error
+			C.dirGuard, dirLockErr = acquireDirectoryLock(C.n.DirLockPath, lockfileName, C.nm.Name, C.nm.Address)
+			for dirLockErr != nil {
+				C.n.L.Printf("[INFO] mlc: waiting to acquire dirLock\n")
+				tries++
+				if tries >= 30 {
+					break
+				}
+				switch {
+				case !C.dirLockLeaderMatches(oldLeader, oldLeaderAddr):
+					C.n.L.Printf("[INFO] mlc: another node has acquired dirLock leader\n")
+					highestNode, highestAddr = C.dirLockLeader()
+					dirLockErr = nil
+				default:
+					time.Sleep(time.Second * 1)
+					C.dirGuard, dirLockErr = acquireDirectoryLock(C.n.DirLockPath, lockfileName, C.nm.Name, C.nm.Address)
+				}
+			}
+			if dirLockErr != nil {
+				C.n.L.Printf("[INFO] mlc: could not acquire or assign dirLock leader, honering dirLock\n")
+				C.nm.Leader, C.nm.LeaderAddr = C.dirLockLeader()
+				C.LocalNode().Meta = C.d.Encode(C.nm)
+				err := C.UpdateNode(time.Second * 5)
+				if err != nil {
+					C.n.L.Printf("[ERROR] mlc: error updating node: %v\n", err)
+				}
+				return
+			}
+			if C.dirLockLeaderMatch() {
+				err := syncDir(C.n.DirLockPath)
+				if err != nil {
+					C.n.L.Printf("[ERROR] mlc: error syncing dirLock: %v\n", err)
+				}
+			}
+		default:
+			var tries int
+			for !C.dirLockLeaderMatches(highestNode, highestAddr) {
+				C.n.L.Printf("[INFO] mlc: waiting for leader dirLock confirmation\n")
+				tries++
+				if tries >= 30 {
+					break
+				}
+				if !C.dirLockLeaderMatches(highestNode, highestAddr) && !C.dirLockLeaderMatches(oldLeader, oldLeaderAddr) {
+					C.n.L.Printf("[INFO] mlc: another node has acquired dirLock leader\n")
+					highestNode, highestAddr = C.dirLockLeader()
+					break
+				}
+				time.Sleep(time.Second * 1)
+			}
+			if !C.dirLockLeaderMatches(highestNode, highestAddr) {
+				C.n.L.Printf("[INFO] mlc: could not acquire or assign dirLock leader, honering dirLock\n")
+				C.nm.Leader, C.nm.LeaderAddr = C.dirLockLeader()
+				C.LocalNode().Meta = C.d.Encode(C.nm)
+				err := C.UpdateNode(time.Second * 5)
+				if err != nil {
+					C.n.L.Printf("[ERROR] mlc: error updating node: %v\n", err)
+				}
+				return
+			}
 		}
 	}
 	C.nm.Leader = highestNode
@@ -113,4 +164,25 @@ func (C *Cluster) electLeader() {
 			}
 		}
 	}
+}
+
+func (C *Cluster) quickElect() (highestNode, highestAddr string) {
+	var highestVal int
+	members := C.Members()
+	sort.SliceStable(members, func(i, j int) bool {
+		return members[i].Name < members[j].Name
+	})
+	for _, m := range members {
+		var val int
+		for _, oct := range strings.Split(m.Addr.String(), `.`) {
+			o, _ := strconv.Atoi(oct)
+			val += o
+		}
+		if val > highestVal {
+			highestNode = m.Name
+			highestAddr = m.Address()
+			highestVal = val
+		}
+	}
+	return
 }

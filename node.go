@@ -13,8 +13,9 @@ const (
 type NodeConfig struct {
 	Name          string
 	BindAddr      string
-	BindPort      int
 	AdvertiseAddr string
+	DirLockPath   string
+	BindPort      int
 	AdvertisePort int
 	Peers         []string
 	Logger        *log.Logger
@@ -58,6 +59,7 @@ func CreateNode(config *NodeConfig) *Node {
 }
 
 type Node struct {
-	Config *memberlist.Config
-	L      *log.Logger
+	Config      *memberlist.Config
+	DirLockPath string
+	L           *log.Logger
 }

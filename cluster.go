@@ -3,11 +3,18 @@ package mlc
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/memberlist"
+)
+
+const (
+	lockfileName = `LOCK`
 )
 
 type Cluster struct {
@@ -19,9 +26,11 @@ type Cluster struct {
 	n             *Node
 	nm            *NodeMeta
 	am            *AppMeta
+	dirGuard      *directoryLockGuard
 	eventChan     chan memberlist.NodeEvent
 	notifications chan []byte
 	notifyIsNil   bool
+	electionFunc  func()
 	notifyFunc    func(*memberlist.Node, []byte) error
 	Tasks         []Task
 }
@@ -51,8 +60,13 @@ func NewCluster(N *Node, appData []byte) *Cluster {
 	}
 }
 
+func (C *Cluster) WithDirLock(dirPath string) {
+	C.n.DirLockPath = dirPath
+}
+
 func (C *Cluster) Connect(peers ...string) error {
 	C.notifyFunc = C.notifyCheck
+	C.electionFunc = C.electLeader
 	C.wg.Add(1)
 	go C.listen()
 	list, err := memberlist.Create(C.n.Config)
@@ -61,6 +75,17 @@ func (C *Cluster) Connect(peers ...string) error {
 	}
 	C.Memberlist = list
 	C.nm.Address = list.LocalNode().Address()
+
+	var dirLockErr error
+	if C.n.DirLockPath != "" {
+		C.dirGuard, dirLockErr = acquireDirectoryLock(C.n.DirLockPath, lockfileName, C.nm.Name, C.nm.Address)
+		if dirLockErr == nil {
+			err := syncDir(C.n.DirLockPath)
+			if err != nil {
+				dirLockErr = fmt.Errorf("error syncing lockDir: %w", err)
+			}
+		}
+	}
 	var filtered []string
 	ap := list.LocalNode().FullAddress()
 	np := ap.Name + `:` + strconv.Itoa(C.n.Config.AdvertisePort)
@@ -72,29 +97,41 @@ func (C *Cluster) Connect(peers ...string) error {
 	mems, err := list.Join(filtered)
 	switch {
 	case err != nil && mems == 0:
-		C.n.L.Printf("[INFO] mlc: Starting Single Node Cluster")
-		C.electLeader()
-		C.n.L.Printf("[INFO] mlc: executing bootstrap tasks\n")
-		for _, task := range C.Tasks {
-			err := task(Bootstrap, C)
-			if err != nil {
-				C.n.L.Printf("[ERROR] mlc: error executing bootstrap task: %v\n", err)
+		switch {
+		case dirLockErr == nil:
+			C.n.L.Printf("[INFO] mlc: Starting Single Node Cluster")
+			C.electLeader()
+			C.n.L.Printf("[INFO] mlc: executing bootstrap tasks\n")
+			for _, task := range C.Tasks {
+				err := task(Bootstrap, C)
+				if err != nil {
+					C.n.L.Printf("[ERROR] mlc: error executing bootstrap task: %v\n", err)
+				}
 			}
+		default:
+			C.n.L.Printf("[ERROR] mlc: error using directory lock: %v\n", dirLockErr)
+			return fmt.Errorf("error using directory lock: %w", dirLockErr)
 		}
 	case mems > 0:
-		var count int
-		list.LocalNode().Meta = C.d.NodeMeta(MetaMaxSize)
-		for C.nm.Leader == "" || C.nm.LeaderAddr == "" {
-			C.n.L.Printf("[INFO] mlc: Waiting for Leader Data")
-			time.Sleep(time.Second * 1)
-			count++
-			if count >= 30 {
-				err := fmt.Errorf("timed out waiting for leader data")
-				C.n.L.Printf("[ERROR] mlc: %v\n", err)
-				return err
+		switch {
+		case C.dirGuard != nil:
+			C.n.L.Printf("[INFO] mlc: I have DirLock!")
+			C.electLeader()
+		default:
+			list.LocalNode().Meta = C.d.NodeMeta(MetaMaxSize)
+			var count int
+			for C.nm.Leader == "" || C.nm.LeaderAddr == "" {
+				C.n.L.Printf("[INFO] mlc: Waiting for Leader Data")
+				time.Sleep(time.Second * 1)
+				count++
+				if count >= 30 {
+					err := fmt.Errorf("timed out waiting for leader data")
+					C.n.L.Printf("[ERROR] mlc: %v\n", err)
+					return err
+				}
 			}
+			C.runOnJoin()
 		}
-		C.runOnJoin()
 	default:
 		return err
 	}
@@ -156,6 +193,11 @@ listenLoop:
 			}
 		}
 	}
+	if C.dirGuard != nil {
+		if err := C.dirGuard.release(); err != nil {
+			C.n.L.Printf("[ERROR] mlc: error releasing dirLock: %v\n", err)
+		}
+	}
 }
 
 func (C *Cluster) Disconnect() error {
@@ -163,4 +205,32 @@ func (C *Cluster) Disconnect() error {
 	C.stop()
 	C.wg.Wait()
 	return err
+}
+
+func (C *Cluster) dirLockLeaderMatch() bool {
+	return C.dirLockLeaderMatches(C.nm.Leader, C.nm.LeaderAddr)
+}
+
+func (C *Cluster) dirLockLeaderMatches(leader, address string) bool {
+	name, addr := C.dirLockLeader()
+	return leader == name && address == addr
+}
+
+func (C *Cluster) dirLockLeader() (name, address string) {
+	absPidFilePath, err := filepath.Abs(filepath.Join(C.n.DirLockPath, lockfileName))
+	if err != nil {
+		return
+	}
+	if !fileExists(absPidFilePath) {
+		return
+	}
+	b, err := ioutil.ReadFile(absPidFilePath)
+	if err != nil || len(b) < 9 {
+		return
+	}
+	na := strings.Split(string(b), `|`)
+	if len(na) != 2 {
+		return
+	}
+	return na[0], na[1]
 }
