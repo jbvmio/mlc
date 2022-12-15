@@ -30,7 +30,6 @@ type Cluster struct {
 	eventChan     chan memberlist.NodeEvent
 	notifications chan []byte
 	notifyIsNil   bool
-	electionFunc  func()
 	notifyFunc    func(*memberlist.Node, []byte) error
 	Tasks         []Task
 }
@@ -66,7 +65,6 @@ func (C *Cluster) WithDirLock(dirPath string) {
 
 func (C *Cluster) Connect(peers ...string) error {
 	C.notifyFunc = C.notifyCheck
-	C.electionFunc = C.electLeader
 	C.wg.Add(1)
 	go C.listen()
 	list, err := memberlist.Create(C.n.Config)

@@ -53,8 +53,9 @@ func CreateNode(config *NodeConfig) *Node {
 		conf.Name = config.Name
 	}
 	return &Node{
-		Config: conf,
-		L:      config.Logger,
+		DirLockPath: config.DirLockPath,
+		Config:      conf,
+		L:           config.Logger,
 	}
 }
 

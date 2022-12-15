@@ -81,5 +81,8 @@ func syncDir(dir string) error {
 	if err != nil {
 		return fmt.Errorf("error while syncing directory: %s: %w", dir, err)
 	}
-	return fmt.Errorf("error while closing directory: %s: %w", dir, closeErr)
+	if closeErr != nil {
+		return fmt.Errorf("error while closing directory: %s: %w", dir, closeErr)
+	}
+	return nil
 }

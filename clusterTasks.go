@@ -56,10 +56,12 @@ func (C *Cluster) runOnJoin() {
 func (C *Cluster) electLeader() {
 	oldLeader := C.nm.Leader
 	oldLeaderAddr := C.nm.LeaderAddr
-	C.n.L.Printf("[INFO] mlc: leader %s with address %s has left, performing election\n", oldLeader, oldLeaderAddr)
+	if oldLeader != "" && oldLeaderAddr != "" {
+		C.n.L.Printf("[INFO] mlc: leader %s with address %s has left, performing election\n", oldLeader, oldLeaderAddr)
+	}
 	highestNode, highestAddr := C.quickElect()
 
-	if C.n.DirLockPath != "" {
+	if C.n.DirLockPath != "" && C.dirGuard == nil {
 		switch highestNode {
 		case C.LocalNode().Name:
 			var tries int
