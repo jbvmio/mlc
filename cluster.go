@@ -77,13 +77,8 @@ func (C *Cluster) Connect(peers ...string) error {
 	var dirLockErr error
 	if C.n.DirLockPath != "" {
 		C.dirGuard, dirLockErr = acquireDirectoryLock(C.n.DirLockPath, lockfileName, C.nm.Name, C.nm.Address)
-		if dirLockErr == nil {
-			err := syncDir(C.n.DirLockPath)
-			if err != nil {
-				dirLockErr = fmt.Errorf("error syncing lockDir: %w", err)
-			}
-		}
 	}
+
 	var filtered []string
 	ap := list.LocalNode().FullAddress()
 	np := ap.Name + `:` + strconv.Itoa(C.n.Config.AdvertisePort)
@@ -203,10 +198,6 @@ func (C *Cluster) Disconnect() error {
 	C.stop()
 	C.wg.Wait()
 	return err
-}
-
-func (C *Cluster) dirLockLeaderMatch() bool {
-	return C.dirLockLeaderMatches(C.nm.Leader, C.nm.LeaderAddr)
 }
 
 func (C *Cluster) dirLockLeaderMatches(leader, address string) bool {

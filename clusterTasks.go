@@ -93,12 +93,6 @@ func (C *Cluster) electLeader() {
 				}
 				return
 			}
-			if C.dirLockLeaderMatch() {
-				err := syncDir(C.n.DirLockPath)
-				if err != nil {
-					C.n.L.Printf("[ERROR] mlc: error syncing dirLock: %v\n", err)
-				}
-			}
 		default:
 			var tries int
 			for !C.dirLockLeaderMatches(highestNode, highestAddr) {
